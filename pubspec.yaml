@@ -7,7 +7,6 @@ repository: https://github.com/simpleCodeGuy/modbus_master
 environment:
   sdk: ^3.0.0
 
-# Add regular dependencies here.
 dependencies:
   equatable: ^2.0.0
   simple_logger: ^1.10.0
