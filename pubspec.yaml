@@ -18,14 +18,10 @@ dev_dependencies:
 
 topics:
 - modbus
-- master
 - tcp
 - embedded
-- industrial
-- automation
 - plc
 - scada
-- master
 
 platforms:
   android:
