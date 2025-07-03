@@ -21,10 +21,10 @@ void main() async {
         ipAddress: '192.168.1.3',
         portNumber: 502,
         unitId: 1,
-        blockNumber: 4,
+        blockNumber: 0,
         elementNumber: 3001,
         timeoutMilliseconds: 1000,
-        valueToBeWritten: 6000 + i,
+        valueToBeWritten: i % 2,
       );
     } catch (e, f) {
       print('EXCEPTION THROWN:-\n$e\n$f');

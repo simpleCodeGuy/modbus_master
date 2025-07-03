@@ -3,367 +3,663 @@ library;
 
 import 'dart:async';
 import 'dart:isolate';
-import 'package:modbus_master/src/modbus_master_base.dart';
+import 'dart:typed_data';
 
-/// ## Steps to use this library
-/// -   mark function async where this object will be used
-/// -   make an instance of ModbusMaster class like this only.
-///     ```
-///     final modbusMaster = await ModbusMaster.start();
-///     ```
-/// -   listen to stream of response using stream
-///     ```
-///     modbusMaster.responses().listen(
-///       (response) {
-///         print(response);
-///       }
-///     );
-///     ```
-/// - Send request to slave using these commands
-///    -   read single coil of a slave
-///        ```
-///        modbusMaster.readCoil(
-///          ipv4: '192.168.29.163',
-///          portNo: 502,
-///          elementNumberOneTo65536: 11,
-///        );
-///        ```
-///
-///    -   read single discrete input of a slave
-///        ```
-///        modbusMaster.readDiscreteInput(
-///          ipv4: '192.168.1.5',
-///          elementNumberOneTo65536: 11,
-///        );
-///        ```
-///    -   read single holding register of a slave
-///        ```
-///        modbusMaster.readHoldingRegister(
-///          ipv4: '192.168.1.5',
-///          elementNumberOneTo65536: 11,
-///        );
-///        ```
-///    -   read single input register of a slave
-///        ```
-///        modbusMaster.readInputRegister(
-///          ipv4: '192.168.1.5',
-///          elementNumberOneTo65536: 11,
-///        );
-///        ```
-///    -   write single coil of a slave
-///        ```
-///        modbusMaster.writeCoil(
-///          ipv4: '192.168.1.5',
-///          elementNumberOneTo65536: 11,
-///          valueToBeWritten: true,
-///        );
-///        ```
-///    -   write single holding register of a slave
-///        ```
-///        modbusMaster.writeHoldingRegister(
-///          ipv4: '192.168.1.5',
-///          elementNumberOneTo65536: 11,
-///          valueToBeWritten: 15525,
-///        );
-///        ```
-/// -   close must be called at end to close all tcp connections and stop modbus master
-///     ```
-///     modbusMaster.close();
-///     ```
+import 'package:equatable/equatable.dart';
+import 'package:modbus_master/src/network_isolate.dart';
+import 'package:modbus_master/src/my_logging.dart';
+
 class ModbusMaster {
-  final _responseStreamController = StreamController<Response>();
-  final _table = Table();
-  late SendPort _sendPort;
-  bool _requestAllowed = false;
+  static const timeoutMillisecondsMinimum = 200;
+  static const timeoutMillisecondsMaximum = 10000;
+  static const socketConnectionTimeoutMilliseconds =
+      NetworkIsolateData.socketConnectionTimeoutMilliseconds;
 
-  ModbusMaster() {
-    throw Exception(
-        'Object of ModbusMaster class should never be instantiated like this.\n'
-        'Correct way of instantiating is\n'
-        'final modbusMaster = await ModbusMaster.start();\n');
+  int _transactionId = 0;
+  bool _isShutdownRequested = false;
+  bool _isNetworkIsolateRunning = false;
+  ReceivePort? _receivePortOfMainIsolate;
+  SendPort? _sendPortOfWorkerIsolate;
+  StreamController<SlaveResponse>? _streamController;
+
+  bool get isStoppedSync => !_isNetworkIsolateRunning;
+
+  Future<bool> get isStoppedAsync async {
+    while (true) {
+      if (_isNetworkIsolateRunning) {
+        await Future.delayed(Duration.zero);
+      } else {
+        return true;
+      }
+    }
   }
 
-  ModbusMaster._instantiate();
+  bool get isRunning => _isNetworkIsolateRunning;
 
-  /// This method is the only way using which an object of ModbusMaster should be created.
+  Stream<SlaveResponse> get responseFromSlaveDevices {
+    if (isStoppedSync) {
+      throw Exception(
+          "Response can only be obtained when modbus master is running."
+          "Use start method of this class to start");
+    } else {
+      return _streamController!.stream;
+    }
+  }
+
+  ModbusMaster() {
+    throw Exception("Correct way of creating object of this class is\n"
+        "final modbusMaster = await ModbusMaster.start();");
+  }
+
+  ModbusMaster._create();
+
   static Future<ModbusMaster> start() async {
-    final modbusMaster = ModbusMaster._instantiate();
+    final modbusMaster = ModbusMaster._create();
 
-    ReceivePort receivePort = ReceivePort();
-    dynamic sendPortDataType = receivePort.sendPort.runtimeType;
+    modbusMaster._streamController = StreamController<SlaveResponse>();
 
-    bool bidirectionalCommunicationEstablished = false;
+    // final receivePort = ReceivePort();
+    modbusMaster._receivePortOfMainIsolate = ReceivePort();
 
-    Isolate workerIsolate = await Isolate.spawn(
-      ModbusMasterForWorker.startWorker,
-      receivePort.sendPort,
+    final workerIsolate = await Isolate.spawn(
+      networkIsolateTask,
+      modbusMaster._receivePortOfMainIsolate!.sendPort,
+      onExit: modbusMaster._receivePortOfMainIsolate!.sendPort,
+      onError: modbusMaster._receivePortOfMainIsolate!.sendPort,
     );
 
-    workerIsolate.hashCode;
+    Logging.i("WORKER ISOLATE SUCCESSFULLY SPAWNED");
+    // print("WORKER ISOLATE SUCCESSFULLY SPAWNED");
 
-    receivePort.listen(
-      (element) {
-        // print('PRINTING RECEIVE PORT ELEMENT $element');
-        if (element.runtimeType == sendPortDataType) {
-          // print('RECEIVED ELEMENT IS SENDPORT');
-          modbusMaster._sendPort = element;
-          bidirectionalCommunicationEstablished = true;
-        } else if (element == null) {
-          // print('null received by main isolate');
-          receivePort.close();
+    modbusMaster._receivePortOfMainIsolate!.listen((data) {
+      Logging.i("MASTER ISOLATE RECEIVED : ${data.runtimeType}\n$data");
+      switch (data) {
+        case SlaveResponseDataReceived _:
+          modbusMaster._streamController!.add(data);
+          break;
+        case SlaveResponseConnectionError _:
+          modbusMaster._streamController!.add(data);
+          break;
+        case SlaveResponseTimeoutError _:
+          modbusMaster._streamController!.add(data);
+          break;
+        case SendPort _:
+          modbusMaster._sendPortOfWorkerIsolate = data;
+          modbusMaster._isNetworkIsolateRunning = true;
+          break;
+        case SlaveResponseShutdownComplete _:
+          modbusMaster._streamController!.close();
+          break;
+        default:
+          if (data == null) {
+            // Logging.i("");
+            modbusMaster._receivePortOfMainIsolate?.close();
+          }
+      }
+    }, onDone: () {
+      workerIsolate.kill();
+      modbusMaster._receivePortOfMainIsolate = null;
+      modbusMaster._sendPortOfWorkerIsolate = null;
+      modbusMaster._isShutdownRequested = false;
+      modbusMaster._isNetworkIsolateRunning = false;
+      Logging.i("MASTER ISOLATE RECEIVED : done event");
+    }, onError: (e, f) {
+      Logging.i("ERROR RECEIVED $e\n$f");
+      modbusMaster._receivePortOfMainIsolate?.close();
+      workerIsolate.kill();
+      modbusMaster._receivePortOfMainIsolate = null;
+      modbusMaster._sendPortOfWorkerIsolate = null;
+      modbusMaster._isShutdownRequested = false;
+      modbusMaster._isNetworkIsolateRunning = false;
+      throw RemoteError(e, f);
+    });
 
-          // workerIsolate.kill(priority: Isolate.immediate);
-        } else {
-          // print(element.runtimeType);
-          // print('RECEIVED ELEMENT IS NOT SENDPORT');
-          modbusMaster._responseStreamController.sink.add(
-            Response.generateResponseAndEraseItsEntryFromChart(
-              modbusResponseData: element,
-              table: modbusMaster._table,
-            ),
-          );
-        }
-      },
-      onDone: () {
-        // print('DONE RECEIVED BY MAIN ISOLATE');
-        receivePort.close();
-      },
-      onError: (_) {
-        // print('ERROR RECEIVED BY MAIN ISOLATE');
-        receivePort.close();
-      },
-    );
-
-    while (!bidirectionalCommunicationEstablished) {
+    while (modbusMaster._sendPortOfWorkerIsolate == null) {
       await Future.delayed(Duration.zero);
     }
-
-    modbusMaster._requestAllowed = true;
 
     return modbusMaster;
   }
 
-  /// - This method closes all resources & disconnects all connections.
-  /// - If any request is made after close( ), then exception is thrown.
-  void close() {
-    if (_requestAllowed) {
-      _sendPort.send(null);
+  void stop() {
+    if (!_isNetworkIsolateRunning) {
+      throw Exception("Cannot stop when it is already stopped");
+    } else if (_isShutdownRequested) {
+      // DO NOTHING BECAUSE SHUTDOWN HAS ALREADY BEEN REQUEST
+    } else {
+      _sendPortOfWorkerIsolate!.send(UserRequestShutdown());
+      _isShutdownRequested = true;
     }
-    _requestAllowed = false;
   }
 
-  ///returns a Stream of Response. All responses from every slave is received
-  ///from here.
-  ///
-  ///It can be used like example given below.
-  ///```
-  ///modbusMaster.responses().listen(
-  ///  (response){
-  ///    print(response);
-  ///  }
-  ///);
-  /// ```
-  Stream<Response> responses() {
-    if (!_requestAllowed) {
+  int read({
+    // required bool isIpv4,
+    // required bool isIpv6,
+    required String ipAddress,
+    required int portNumber,
+    required int unitId,
+    required int blockNumber,
+    required int elementNumber,
+    required int timeoutMilliseconds,
+  }) {
+    if (isStoppedSync) {
       throw Exception(
-          '"responses" is called, either before "start", or after "close"');
+          "read method works after object of ModbusMaster class is started");
+    }
+    // if (isIpv4 && isIpv6) {
+    //   throw Exception("address cannot be of both ipv4 & ipv6 type");
+    // }
+    if (unitId < 0 || unitId > 255) {
+      throw Exception("unit id must be between 0 and 255");
+    }
+    if (!(blockNumber == 0 ||
+        blockNumber == 1 ||
+        blockNumber == 3 ||
+        blockNumber == 4)) {
+      throw Exception("block number must be either 0, 1, 3 or 4");
+    }
+    if (elementNumber < 1 || elementNumber > 65536) {
+      throw Exception("unit id must be between 1 and 65536");
+    }
+    if (timeoutMilliseconds < ModbusMaster.timeoutMillisecondsMinimum ||
+        timeoutMilliseconds > ModbusMaster.timeoutMillisecondsMaximum) {
+      throw Exception("Timeout value should be between "
+          "${ModbusMaster.timeoutMillisecondsMinimum} and "
+          "${ModbusMaster.timeoutMillisecondsMaximum} milliseconds.");
     }
 
-    return _responseStreamController.stream;
+    _transactionId = _transactionId == 65535 ? 0 : _transactionId + 1;
 
-    // return _streamController.stream.map((modbusResponseData) {
-    //   return Response.generateResponseAndEraseItsEntryFromChart(
-    //       modbusResponseData: modbusResponseData, table: _table);
-    // });
+    if (blockNumber == 0) {
+      _sendPortOfWorkerIsolate?.send(_generateReadRequestStreamElementForCoil(
+        // isIpv4: isIpv4,
+        // isIpv6: isIpv6,
+        ipAddress: ipAddress,
+        portNumber: portNumber,
+        unitId: unitId,
+        blockNumber: blockNumber,
+        elementNumber: elementNumber,
+        timeoutMilliseconds: timeoutMilliseconds,
+        transactionId: _transactionId,
+      ));
+    } else if (blockNumber == 1) {
+      _sendPortOfWorkerIsolate
+          ?.send(_generateReadRequestStreamElementForDiscreteInput(
+        // isIpv4: isIpv4,
+        // isIpv6: isIpv6,
+        ipAddress: ipAddress,
+        portNumber: portNumber,
+        unitId: unitId,
+        blockNumber: blockNumber,
+        elementNumber: elementNumber,
+        timeoutMilliseconds: timeoutMilliseconds,
+        transactionId: _transactionId,
+      ));
+    } else if (blockNumber == 3) {
+      _sendPortOfWorkerIsolate
+          ?.send(_generateReadRequestStreamElementForInputRegister(
+        // isIpv4: isIpv4,
+        // isIpv6: isIpv6,
+        ipAddress: ipAddress,
+        portNumber: portNumber,
+        unitId: unitId,
+        blockNumber: blockNumber,
+        elementNumber: elementNumber,
+        timeoutMilliseconds: timeoutMilliseconds,
+        transactionId: _transactionId,
+      ));
+    } else if (blockNumber == 4) {
+      _sendPortOfWorkerIsolate
+          ?.send(_generateReadRequestStreamElementForHoldingRegister(
+        // isIpv4: isIpv4,
+        // isIpv6: isIpv6,
+        ipAddress: ipAddress,
+        portNumber: portNumber,
+        unitId: unitId,
+        blockNumber: blockNumber,
+        elementNumber: elementNumber,
+        timeoutMilliseconds: timeoutMilliseconds,
+        transactionId: _transactionId,
+      ));
+    }
+
+    return _transactionId;
   }
 
-  /// Request is sent to a slave using this method, for example
-  /// ```
-  /// _sendRequest(Request(
-  ///   ipv4: '192.168.1.5',
-  ///   transactionId: 1,
-  ///   isWrite: Request.REQUEST_READ,
-  ///   elementType: Request.ELEMENT_TYPE_HOLDING_REGISTER,
-  ///   elementNumber: 1,
-  ///   valueToBeWritten: null,
-  /// ));
-  /// ```
-  /// Higher level methods, the names of which are given below use _sendRequest for sending request.
-  /// -  readCoil
-  /// -  readDiscreteInput
-  /// -  readHoldingRegister
-  /// -  readInputRegister
-  /// -  writeCoil
-  /// -  writeHoldingRegister
-  void _sendRequest(Request request, {bool printRequest = false}) {
-    if (!_requestAllowed) {
+  int write({
+    // required bool isIpv4,
+    // required bool isIpv6,
+    required String ipAddress,
+    required int portNumber,
+    required int unitId,
+    required int blockNumber,
+    required int elementNumber,
+    required int timeoutMilliseconds,
+    required int valueToBeWritten,
+  }) {
+    if (isStoppedSync) {
       throw Exception(
-          '"sendRequest" is called, either before "start", or after "close"');
+          "read method works after object of ModbusMaster class is started");
+    }
+    // if (isIpv4 && isIpv6) {
+    //   throw Exception("address cannot be of both ipv4 & ipv6 type");
+    // }
+    if (unitId < 0 || unitId > 255) {
+      throw Exception("unit id must be between 0 and 255");
+    }
+    if (!(blockNumber == 0 ||
+        blockNumber == 1 ||
+        blockNumber == 3 ||
+        blockNumber == 4)) {
+      throw Exception("block number must be either 0, 1, 3 or 4");
+    }
+    if (elementNumber < 1 || elementNumber > 65536) {
+      throw Exception("unit id must be between 1 and 65536");
+    }
+    if (timeoutMilliseconds < ModbusMaster.timeoutMillisecondsMinimum ||
+        timeoutMilliseconds > ModbusMaster.timeoutMillisecondsMaximum) {
+      throw Exception("Timeout value should be between "
+          "${ModbusMaster.timeoutMillisecondsMinimum} and "
+          "${ModbusMaster.timeoutMillisecondsMaximum} milliseconds.");
+    }
+    if (blockNumber == 0) {
+      if ((valueToBeWritten == 0 || valueToBeWritten == 1)) {
+        // DO NOTHING
+      } else {
+        throw Exception("For block no. 0 i.e. coil, value to be written should "
+            "be either 0 or 1");
+      }
+    }
+    if (blockNumber == 4) {
+      if ((valueToBeWritten < 0 || valueToBeWritten > 65535)) {
+        throw Exception("For block no. 4 i.e. holding register, value to be "
+            "written should be between 0 and 65535");
+      }
     }
 
-    if (printRequest) {
-      print(request);
+    _transactionId = _transactionId == 65535 ? 0 : _transactionId + 1;
+
+    if (blockNumber == 0) {
+      _sendPortOfWorkerIsolate?.send(_generateWriteRequestStreamElementForCoil(
+          // isIpv4: isIpv4,
+          // isIpv6: isIpv6,
+          ipAddress: ipAddress,
+          portNumber: portNumber,
+          unitId: unitId,
+          blockNumber: blockNumber,
+          elementNumber: elementNumber,
+          timeoutMilliseconds: timeoutMilliseconds,
+          transactionId: _transactionId,
+          valueToBeWritten: valueToBeWritten));
+    } else if (blockNumber == 4) {
+      Logging.i("TRYING TO SEND WRITE REQUEST FOR HOLDING REGISTER");
+      _sendPortOfWorkerIsolate
+          ?.send(_generateWriteRequestStreamElementForHoldingRegister(
+              // isIpv4: isIpv4,
+              // isIpv6: isIpv6,
+              ipAddress: ipAddress,
+              portNumber: portNumber,
+              unitId: unitId,
+              blockNumber: blockNumber,
+              elementNumber: elementNumber,
+              timeoutMilliseconds: timeoutMilliseconds,
+              transactionId: _transactionId,
+              valueToBeWritten: valueToBeWritten));
     }
-    // _requests.addLast(_modbusRequestDataFromRequest(request));
 
-    // ++_countOfRequestForWhichResponsesNotReceived;
-    // _requests.append(ModbusRequestData.fromRequest(request));
-
-    // print(_requests);
-
-    final modbusRequestData =
-        ModbusRequestData.fromRequest(request: request, table: _table);
-
-    _sendPort.send(modbusRequestData);
+    return _transactionId;
   }
 
-  /// To send request to a slave for reading single discrete input of a slave, use this command
-  /// ```
-  /// modbusMaster.readDiscreteInput(
-  ///   ipv4: '192.168.1.5',
-  ///   elementNumberOneTo65536: 11,
-  /// );
-  /// ```
-  void readDiscreteInput({
-    required String ipv4,
-    int portNo = 502,
-    required int elementNumberOneTo65536,
-    Duration timeout = const Duration(milliseconds: 1000),
-    bool printRequest = false,
+  UserRequestData _generateReadRequestStreamElementForCoil({
+    // required bool isIpv4,
+    // required bool isIpv6,
+    required String ipAddress,
+    required int portNumber,
+    required int unitId,
+    required int blockNumber,
+    required int elementNumber,
+    required int timeoutMilliseconds,
+    required int transactionId,
   }) {
-    final request = Request.fromReadDiscreteInputValues(
-      ipv4: ipv4,
-      port: portNo,
-      elementNumberFrom1To65536: elementNumberOneTo65536,
-      timeout: timeout,
+    final memoryAddress = elementNumber - 1;
+    final memoryAddressLsb = memoryAddress % 256;
+    final memoryAddressMsb = memoryAddress ~/ 256;
+    final transactionIdLsb = transactionId % 256;
+    final transactionIdMsb = transactionId ~/ 256;
+    final mbap = Uint8List.fromList(
+        [transactionIdMsb, transactionIdLsb, 0, 0, 0, 6, unitId]);
+    final pdu =
+        Uint8List.fromList([1, memoryAddressMsb, memoryAddressLsb, 0, 1]);
+    return UserRequestData(
+      // isIpv4: isIpv4,
+      // isIpv6: isIpv6,
+      ipAddress: ipAddress,
+      portNumber: portNumber,
+      unitId: unitId,
+      blockNumber: blockNumber,
+      elementNumber: elementNumber,
+      transactionId: transactionId,
+      timeoutMilliseconds: timeoutMilliseconds,
+      mbap: mbap,
+      pdu: pdu,
     );
-
-    _sendRequest(request, printRequest: printRequest);
   }
 
-  /// To send request to a slave for reading single coil, use this command
-  /// ```
-  /// modbusMaster.readCoil(
-  ///   ipv4: '192.168.1.5',
-  ///   elementNumberOneTo65536: 11,
-  /// );
-  /// ```
-  void readCoil({
-    required String ipv4,
-    int portNo = 502,
-    required int elementNumberOneTo65536,
-    Duration timeout = const Duration(milliseconds: 1000),
-    bool printRequest = false,
+  UserRequestData _generateReadRequestStreamElementForDiscreteInput({
+    // required bool isIpv4,
+    // required bool isIpv6,
+    required String ipAddress,
+    required int portNumber,
+    required int unitId,
+    required int blockNumber,
+    required int elementNumber,
+    required int timeoutMilliseconds,
+    required int transactionId,
   }) {
-    final request = Request.fromReadCoilValues(
-      ipv4: ipv4,
-      port: portNo,
-      elementNumberFrom1To65536: elementNumberOneTo65536,
-      timeout: timeout,
+    final memoryAddress = elementNumber - 1;
+    final memoryAddressLsb = memoryAddress % 256;
+    final memoryAddressMsb = memoryAddress ~/ 256;
+    final transactionIdLsb = transactionId % 256;
+    final transactionIdMsb = transactionId ~/ 256;
+    final mbap = Uint8List.fromList(
+        [transactionIdMsb, transactionIdLsb, 0, 0, 0, 6, unitId]);
+    final pdu =
+        Uint8List.fromList([2, memoryAddressMsb, memoryAddressLsb, 0, 1]);
+    return UserRequestData(
+      // isIpv4: isIpv4,
+      // isIpv6: isIpv6,
+      ipAddress: ipAddress,
+      portNumber: portNumber,
+      unitId: unitId,
+      blockNumber: blockNumber,
+      elementNumber: elementNumber,
+      transactionId: transactionId,
+      timeoutMilliseconds: timeoutMilliseconds,
+      mbap: mbap,
+      pdu: pdu,
     );
-
-    _sendRequest(request, printRequest: printRequest);
   }
 
-  /// To send request to a slave for reading single 16-bit input register, use this command
-  /// ```
-  /// modbusMaster.readInputRegister(
-  ///   ipv4: '192.168.1.5',
-  ///   elementNumberOneTo65536: 11,
-  /// );
-  /// ```
-  void readInputRegister({
-    required String ipv4,
-    int portNo = 502,
-    required int elementNumberOneTo65536,
-    Duration timeout = const Duration(milliseconds: 1000),
-    bool printRequest = false,
+  UserRequestData _generateReadRequestStreamElementForInputRegister({
+    // required bool isIpv4,
+    // required bool isIpv6,
+    required String ipAddress,
+    required int portNumber,
+    required int unitId,
+    required int blockNumber,
+    required int elementNumber,
+    required int timeoutMilliseconds,
+    required int transactionId,
   }) {
-    final request = Request.fromReadInputRegisterValues(
-      ipv4: ipv4,
-      port: portNo,
-      elementNumberFrom1To65536: elementNumberOneTo65536,
-      timeout: timeout,
+    final memoryAddress = elementNumber - 1;
+    final memoryAddressLsb = memoryAddress % 256;
+    final memoryAddressMsb = memoryAddress ~/ 256;
+    final transactionIdLsb = transactionId % 256;
+    final transactionIdMsb = transactionId ~/ 256;
+    final mbap = Uint8List.fromList(
+        [transactionIdMsb, transactionIdLsb, 0, 0, 0, 6, unitId]);
+    final pdu =
+        Uint8List.fromList([4, memoryAddressMsb, memoryAddressLsb, 0, 1]);
+    return UserRequestData(
+      // isIpv4: isIpv4,
+      // isIpv6: isIpv6,
+      ipAddress: ipAddress,
+      portNumber: portNumber,
+      unitId: unitId,
+      blockNumber: blockNumber,
+      elementNumber: elementNumber,
+      transactionId: transactionId,
+      timeoutMilliseconds: timeoutMilliseconds,
+      mbap: mbap,
+      pdu: pdu,
     );
-
-    _sendRequest(request, printRequest: printRequest);
   }
 
-  /// To send request to a slave to read single 16-bit holding register, use this command
-  /// ```
-  /// modbusMaster.readHoldingRegister(
-  ///   ipv4: '192.168.1.5',
-  ///   elementNumberOneTo65536: 11,
-  /// );
-  /// ```
-  void readHoldingRegister({
-    required String ipv4,
-    int portNo = 502,
-    required int elementNumberOneTo65536,
-    Duration timeout = const Duration(milliseconds: 1000),
-    bool printRequest = false,
+  UserRequestData _generateReadRequestStreamElementForHoldingRegister({
+    // required bool isIpv4,
+    // required bool isIpv6,
+    required String ipAddress,
+    required int portNumber,
+    required int unitId,
+    required int blockNumber,
+    required int elementNumber,
+    required int timeoutMilliseconds,
+    required int transactionId,
   }) {
-    final request = Request.fromReadHoldingRegisterValues(
-      ipv4: ipv4,
-      port: portNo,
-      elementNumberFrom1To65536: elementNumberOneTo65536,
-      timeout: timeout,
+    final memoryAddress = elementNumber - 1;
+    final memoryAddressLsb = memoryAddress % 256;
+    final memoryAddressMsb = memoryAddress ~/ 256;
+    final transactionIdLsb = transactionId % 256;
+    final transactionIdMsb = transactionId ~/ 256;
+    final mbap = Uint8List.fromList(
+        [transactionIdMsb, transactionIdLsb, 0, 0, 0, 6, unitId]);
+    final pdu =
+        Uint8List.fromList([3, memoryAddressMsb, memoryAddressLsb, 0, 1]);
+    return UserRequestData(
+      // isIpv4: isIpv4,
+      // isIpv6: isIpv6,
+      ipAddress: ipAddress,
+      portNumber: portNumber,
+      unitId: unitId,
+      blockNumber: blockNumber,
+      elementNumber: elementNumber,
+      transactionId: transactionId,
+      timeoutMilliseconds: timeoutMilliseconds,
+      mbap: mbap,
+      pdu: pdu,
     );
-
-    _sendRequest(request, printRequest: printRequest);
   }
 
-  /// To send request to a slave for writing single coil, use this command
-  /// ```
-  /// modbusMaster.writeCoil(
-  ///   ipv4: '192.168.1.5',
-  ///   elementNumberOneTo65536: 11,
-  ///   valueToBeWritten: true,
-  /// );
-  /// ```
-  void writeCoil({
-    required String ipv4,
-    int portNo = 502,
-    required int elementNumberOneTo65536,
-    required bool valueToBeWritten,
-    Duration timeout = const Duration(milliseconds: 1000),
-    bool printRequest = false,
+  UserRequestData _generateWriteRequestStreamElementForCoil({
+    // required bool isIpv4,
+    // required bool isIpv6,
+    required String ipAddress,
+    required int portNumber,
+    required int unitId,
+    required int blockNumber,
+    required int elementNumber,
+    required int timeoutMilliseconds,
+    required int transactionId,
+    required int valueToBeWritten,
   }) {
-    final request = Request.fromWriteCoilValues(
-      ipv4: ipv4,
-      port: portNo,
-      elementNumberFrom1To65536: elementNumberOneTo65536,
-      timeout: timeout,
-      valueToBeWritten: valueToBeWritten,
+    final memoryAddress = elementNumber - 1;
+    final memoryAddressLsb = memoryAddress % 256;
+    final memoryAddressMsb = memoryAddress ~/ 256;
+    final valueMsb = valueToBeWritten == 0 ? 0 : 255;
+    final valueLsb = 0;
+    final transactionIdLsb = transactionId % 256;
+    final transactionIdMsb = transactionId ~/ 256;
+    final mbap = Uint8List.fromList(
+        [transactionIdMsb, transactionIdLsb, 0, 0, 0, 6, unitId]);
+    final pdu = Uint8List.fromList(
+        [5, memoryAddressMsb, memoryAddressLsb, valueMsb, valueLsb]);
+    return UserRequestData(
+      // isIpv4: isIpv4,
+      // isIpv6: isIpv6,
+      ipAddress: ipAddress,
+      portNumber: portNumber,
+      unitId: unitId,
+      blockNumber: blockNumber,
+      elementNumber: elementNumber,
+      transactionId: transactionId,
+      timeoutMilliseconds: timeoutMilliseconds,
+      mbap: mbap,
+      pdu: pdu,
     );
-
-    _sendRequest(request, printRequest: printRequest);
   }
 
-  /// To send request to a slave for writing single 16-bit holding register, use this command
-  /// ```
-  /// modbusMaster.writeHoldingRegister(
-  ///   ipv4: '192.168.1.5',
-  ///   elementNumberOneTo65536: 11,
-  ///   valueToBeWritten: 15525,
-  /// );
-  /// ```
-  void writeHoldingRegister({
-    required String ipv4,
-    int portNo = 502,
-    required int elementNumberOneTo65536,
-    required int integerValueToBeWrittenZeroTo65535,
-    Duration timeout = const Duration(milliseconds: 1000),
-    bool printRequest = false,
+  UserRequestData _generateWriteRequestStreamElementForHoldingRegister({
+    // required bool isIpv4,
+    // required bool isIpv6,
+    required String ipAddress,
+    required int portNumber,
+    required int unitId,
+    required int blockNumber,
+    required int elementNumber,
+    required int timeoutMilliseconds,
+    required int transactionId,
+    required int valueToBeWritten,
   }) {
-    final request = Request.fromWriteHoldingRegisterValues(
-      ipv4: ipv4,
-      port: portNo,
-      elementNumberFrom1To65536: elementNumberOneTo65536,
-      timeout: timeout,
-      valueToBeWritten: integerValueToBeWrittenZeroTo65535,
+    final memoryAddress = elementNumber - 1;
+    final memoryAddressLsb = memoryAddress % 256;
+    final memoryAddressMsb = memoryAddress ~/ 256;
+    final valueLsb = valueToBeWritten % 256;
+    final valueMsb = valueToBeWritten ~/ 256;
+    final transactionIdLsb = transactionId % 256;
+    final transactionIdMsb = transactionId ~/ 256;
+    final mbap = Uint8List.fromList(
+        [transactionIdMsb, transactionIdLsb, 0, 0, 0, 6, unitId]);
+    final pdu = Uint8List.fromList(
+        [6, memoryAddressMsb, memoryAddressLsb, valueMsb, valueLsb]);
+    return UserRequestData(
+      // isIpv4: isIpv4,
+      // isIpv6: isIpv6,
+      ipAddress: ipAddress,
+      portNumber: portNumber,
+      unitId: unitId,
+      blockNumber: blockNumber,
+      elementNumber: elementNumber,
+      transactionId: transactionId,
+      timeoutMilliseconds: timeoutMilliseconds,
+      mbap: mbap,
+      pdu: pdu,
     );
-
-    _sendRequest(request, printRequest: printRequest);
   }
+}
+
+//----------------------------DATA STRUCTURE------------------------------------
+sealed class SlaveResponse extends Equatable {
+  @override
+  List<Object?> get props => [];
+}
+
+final class SlaveResponseDataReceived extends SlaveResponse {
+  final int transactionId;
+  final String ipAddress;
+  final int portNumber;
+  final int unitId;
+  final int blockNumber;
+  final int elementNumber;
+  final String mbap;
+  final String pdu;
+  final bool isReadResponse;
+  final int? readValue;
+  final bool isWriteResponse;
+  final int? writeValue;
+
+  SlaveResponseDataReceived({
+    required this.transactionId,
+    // required this.isIpv4,
+    // required this.isIpv6,
+    required this.ipAddress,
+    required this.portNumber,
+    required this.unitId,
+    required this.blockNumber,
+    required this.elementNumber,
+    required this.mbap,
+    required this.pdu,
+    required this.isReadResponse,
+    required this.readValue,
+    required this.isWriteResponse,
+    required this.writeValue,
+  });
+
+  @override
+  List<Object?> get props => [];
+
+  @override
+  String toString() => "SlaveResponseDataReceived\n"
+      "{\n"
+      // "    isIpv4:$isIpv4, isIpv6:$isIpv6, "
+      "    ipAddress:$ipAddress, portNumber:$portNumber, unitId:$unitId,\n"
+      "    mbap:$mbap, pdu:$pdu\n"
+      "    isReadResponse:$isReadResponse, readValue:$readValue, "
+      "isWriteResponse:$isWriteResponse, writeValue:$writeValue\n"
+      "    blockNumber:$blockNumber, elementNumber:$elementNumber\n"
+      "}";
+}
+
+final class SlaveResponseConnectionError extends SlaveResponse {
+  final int transactionId;
+  final String ipAddress;
+  final int portNumber;
+  final int unitId;
+  final int blockNumber;
+  final int elementNumber;
+
+  SlaveResponseConnectionError({
+    required this.transactionId,
+    required this.ipAddress,
+    required this.portNumber,
+    required this.unitId,
+    required this.blockNumber,
+    required this.elementNumber,
+  });
+
+  @override
+  List<Object?> get props => [
+        ...super.props,
+        // transactionId,
+        // isIpv4,
+        // isIpv6,
+        // ipAddress,
+        // portNumber,
+        // unitId
+      ];
+
+  @override
+  String toString() => "SlaveResponseConnectionError\n"
+      "{\n"
+      // "    isIpv4:$isIpv4, isIpv6:$isIpv6, "
+      "    ipAddress:$ipAddress, portNumber:$portNumber, unitId:$unitId\n"
+      "    blockNumber:$blockNumber, elementNumber:$elementNumber\n"
+      "}";
+}
+
+final class SlaveResponseTimeoutError extends SlaveResponse {
+  final int transactionId;
+  final String ipAddress;
+  final int portNumber;
+  final int unitId;
+  final int blockNumber;
+  final int elementNumber;
+  final int timeoutMilliseconds;
+
+  SlaveResponseTimeoutError({
+    required this.transactionId,
+    // required this.isIpv4,
+    // required this.isIpv6,
+    required this.ipAddress,
+    required this.portNumber,
+    required this.unitId,
+    required this.blockNumber,
+    required this.elementNumber,
+    required this.timeoutMilliseconds,
+  });
+
+  @override
+  List<Object?> get props => [
+        ...super.props,
+        // transactionId,
+        // isIpv4,
+        // isIpv6,
+        // ipAddress,
+        // portNumber,
+        // unitId,
+        // timeoutMilliseconds
+      ];
+
+  @override
+  String toString() => "SlaveResponseTimeoutError\n"
+      "{\n"
+      // "    isIpv4:$isIpv4, isIpv6:$isIpv6, "
+      "    ipAddress:$ipAddress, portNumber:$portNumber, unitId:$unitId, \n"
+      "    blockNumber:$blockNumber, elementNumber:$elementNumber, "
+      "timeoutMilliseconds:$timeoutMilliseconds\n"
+      "}";
+}
+
+final class SlaveResponseShutdownComplete extends SlaveResponse {
+  @override
+  List<Object?> get props => [];
 }

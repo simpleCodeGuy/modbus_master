@@ -3,6 +3,8 @@ import 'package:modbus_master/modbus_master.dart';
 void main() async {
   final modbusMaster = await ModbusMaster.start();
 
+  // modbusMaster.
+
   int countResponseReceived = 0;
   modbusMaster.responseFromSlaveDevices.listen(
     (response) {
@@ -17,14 +19,13 @@ void main() async {
 
   for (int i = 1; i <= 5; ++i) {
     try {
-      modbusMaster.write(
+      modbusMaster.read(
         ipAddress: '192.168.1.3',
         portNumber: 502,
         unitId: 1,
-        blockNumber: 4,
-        elementNumber: 3001,
+        blockNumber: 1, // FOR DISCRETE INPUT, BLOCK NUMBER = 1
+        elementNumber: i,
         timeoutMilliseconds: 1000,
-        valueToBeWritten: 6000 + i,
       );
     } catch (e, f) {
       print('EXCEPTION THROWN:-\n$e\n$f');
