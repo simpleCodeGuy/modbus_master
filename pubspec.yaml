@@ -1,6 +1,6 @@
 name: modbus_master
 description: An easy to use package using which a dart program can work as a Modbus/TCP master device.
-version: 2.0.0
+version: 2.0.1
 # publish_to: None
 repository: https://github.com/simpleCodeGuy/modbus_master
 

@@ -6,3 +6,8 @@
 - Intuitive method names for object creation. "start" method creates object & initializes all resouces. "stop" method shuts down all resources & disconnects all TCP connections.
 - Asynchronous ```isStoppedAsync``` method to check whether object is stopped.
 - Bug fixes.
+
+## 2.0.1
+- Updated README.md file
+- Provided docstrings
+- updated modbus_slave.py file

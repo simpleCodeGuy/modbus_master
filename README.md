@@ -1,4 +1,4 @@
-**'modbus_master' is an easy to use package using which a dart program can work as a Modbus/TCP master device.**
+**"modbus_master" is an easy to use package using which a dart program can work as a Modbus/TCP master device.**
 
 # Features
 - Currently users can use only these features of Modbus/TCP protocol:
@@ -13,8 +13,8 @@
 
 # Limitations
 - Tested with only ipv4.
-- Only single element can be read at once. Reading multiple coils or multiple registers is not implemented in this library, although reading multiple elements is specified in Modbus/TCP implementation.
-- Only single element can be written to at once. Writing to multiple coils or to multiple registers is not implemented in this library, although writing to multiple elements is specified in Modbus/TCP protocol.
+- Only single element can be read at once. Reading multiple coils or multiple registers is not implemented in this library, although reading multiple elements at once is specified in Modbus/TCP protocol.
+- Only single element can be written to at once. Writing to multiple coils or to multiple registers is not implemented in this library, although writing to multiple elements at once is specified in Modbus/TCP protocol.
 
 # How to use this library?
 -   make an instance of ModbusMaster class
@@ -57,9 +57,39 @@
     ```
     modbusMaster.stop();
     ```
+
+- Wait to know that that all resources have been properly stopped
+    ```
+    final isProperlyStopped = await modbusMaster.isStoppedAsync
+    ```
 # Example program:-  
-### Send read request to slave device for reading Holding Register 6001,6002,6003,6004,6005. When 5 responses are received from slave device, then object is stopped.
+### First start a Modbus TCP Slave Server. 
+If you already have access to a Modbus TCP Slave device, then skip this.
+
+* If you do not have access to a Modbus TCP Slave device, then a sample slave program is provided which can be found in "example/modbus_slave.py".
+
+*  Requirements: 
+    * python programming language 
+    * pymodbus library
+
+
+*  Steps to run sample Modbus TCP Slave Server
+    * Open folder in terminal where file "modbus_slave.py" exists
+    * Use below command in terminal to run sample Modbus TCP Slave Server
+      
+      ```python modbus_slave.py```
+
+### Start Modbus TCP Master object. Send read request to slave device for reading Holding Register 6001,6002,6003,6004,6005. When 5 responses are received from slave device, then object is stopped.
+
+modbus_master_example.dart
 ```
+/// This example sends 5 read commands
+/// - Read Holding Register 6001
+/// - Read Holding Register 6002
+/// - Read Holding Register 6003
+/// - Read Holding Register 6004
+/// - Read Holding Register 6005
+
 import 'package:modbus_master/modbus_master.dart';
 
 void main() async {
@@ -80,10 +110,10 @@ void main() async {
   for (int i = 1; i <= 5; ++i) {
     try {
       modbusMaster.read(
-        ipAddress: '192.168.1.3',
-        portNumber: 502,
-        unitId: 1,
-        blockNumber: 4,
+        ipAddress: '192.168.29.166', // change it as per your slave device
+        portNumber: 502, // change it as per your slave device
+        unitId: 1, // change it as per your slave device
+        blockNumber: 4, // block number 4 means Holding Register
         elementNumber: 6000 + i,
         timeoutMilliseconds: 1000,
       );
@@ -93,12 +123,22 @@ void main() async {
     await Future.delayed(Duration(seconds: 2));
   }
 
+  //  * Program must not be exited or killed immediately after this stop method.
+  //    It takes sometime to close all resources including TCP sockets.
+  //
+  //  * Immediate exiting or killing program after stop method
+  //    risk of program exit with open TCP socket.
+  //
+  //  * Programmer should use isStoppedAsync to know whether object has stopped.
+  //    If isStoppedAsync returns Future of True, then program can be safely
+  //    exited.
   final isModbusMasterStopped = await modbusMaster.isStoppedAsync;
   if (isModbusMasterStopped) {
-    print("Modbus Master has stopped.");
+    print("Modbus Master has stopped. Now, program can be safely exited.");
+  } else {
+    print("Modbus master has not stopped.");
   }
 }
-
 ```
 
 # Class and its methods provided in this library
@@ -110,7 +150,7 @@ void main() async {
     ```
 
 2. ```responseFromSlaveDevices```
-    - Returns a stream of type SlaveResponse. Only 3 of its subtypes are elements of this stream.
+    - Returns a stream of type SlaveResponse. (Only 3 out of 4 subtypes of SlaveResponse are elements of this stream.)
         - SlaveResponseDataReceived
         - SlaveResponseConnectionError
         - SlaveResponseTimeoutError
@@ -121,6 +161,7 @@ void main() async {
       },
     );
     ```
+    
 3. ```isRunning```
     - A boolean field which tells whether this object i.e. Modbus Master object is running
     ```
@@ -128,11 +169,13 @@ void main() async {
     ```
 4. ```isStoppedSync```
     - A boolean field which tells whether ModbusMaster object is stopped.
+    - When this is true, then it means that all resources of this object including TCP sockets have been properly stopped.
     ```
     print(modbusMaster.isStoppedSync);
     ```
 5. ```isStoppedAsync```
     - A Future which is true when ModbusMaster object is stopped.
+    - When this is Future of true, then it means that resources of this object including including TCP sockets have been properly stopped.
     ```
     print(await modbusMaster.isStoppedAsync);
     ```
@@ -206,15 +249,18 @@ This library supports minimum timeout of 200 milliseconds i.e. 0.2 seconds.
     );
     ```
 
-11. ```close```
+11. ```stop```
     - Disconnects connection with all active slave devices & shuts down Modbus TCP master object.
-    ```
-    modbusMaster.stop();
-    ```
+      ```
+      modbusMaster.stop();
+      ```
+    - Program must not be exited or killed immediately after this ```stop``` method.  It takes sometime to close all resources including TCP sockets.
+    - Immediate exiting or killing program after ```stop``` method involves risk of program exit with open TCP socket.
+    -  Ideally, programmer should use ```isStoppedAsync``` to know whether object has stopped. If ```isStoppedAsync``` returns Future of true, then program can be safely exited.
 
 ### (II) sealed class SlaveResponse class and its sub types
-```SlaveResponse``` is a sealed class, hence its object is not created, rather object of its sub-types are created internally by library. These subtypes are received as an element of stream ```responseFromSlaveDevices```. These sub-types are as follows:
-1. ```SlaveResponseDataReceived```
+```SlaveResponse``` is a sealed class, hence its object is not created, rather object of its sub-types are created internally by library. These subtypes are received as an element of stream ```responseFromSlaveDevices``` of object of class ```ModbusMaster```. These sub-types are as follows:
+1. ```SlaveResponseConnectionError```
     - When TCP connection is not established with a slave device, then this element is received from stream responseFromSlaveDevices
     - Fields of its objects are:-
       1. ```int transactionId``` :- Each modbus transaction has a unique number from 0 to 65535. Request & response have same transaction id, using which they are identified.
@@ -224,7 +270,18 @@ This library supports minimum timeout of 200 milliseconds i.e. 0.2 seconds.
       5. ``` int blockNumber``` :- block number is 0 for Coil, 1 for Discrete Input, 3 for Input Register, 4 for Holding Register
       6. ```int elementNumber```:- element number is an integer value from 1 to 65536
 
-2. ```SlaveResponseConnectionError```
+2. ```SlaveResponseTimeoutError```
+    - When slave device does not respond within timeout value provided during read or write request, then this element is received from stream responseFromSlaveDevices
+    - Fields of its objects are:-
+        1. ```int transactionId``` :- Each modbus transaction has a unique number from 0 to 65535. Request & response have same transaction id, using which they are identified.
+        2. ``` String ipAddress``` :- ip address of slave device
+        3. ``` int portNumber``` :- port number of slave device
+        4. ```int unitId``` :- Commonly used in  Modbus Gateway (TCP to Serial):- Multiple Modbus RTU devices are connected to single Modbus TCP address. Each Modbus RTU device has same ip address and port number but different unit id.
+        5. ```int blockNumber``` :- block number is 0 for Coil, 1 for Discrete Input, 3 for Input Register, 4 for Holding Register
+        6. ```int elementNumber``` :- element number is an integer value from 1 to 65536
+        7. ```int timeoutMilliseconds``` :- Slave has not been able to respond within this time.
+
+3. ```SlaveResponseDataReceived```
     - When slave device responds with a data, then object of this type is received from the stream responseFromSlaveDevices
     - Fields of its objects are:-
       1. ```int transactionId``` :- Each modbus transaction has a unique number from 0 to 65535. Request & response have same transaction id, using which they are identified.
@@ -241,16 +298,7 @@ This library supports minimum timeout of 200 milliseconds i.e. 0.2 seconds.
       12. ```int? writeValue```:- If PDU contains a write response, then it contains its value.
   
   
-3. ```SlaveResponseTimeoutError```
-    - When slave device does not respond within timeout value provided during read or write request, then this element is received from stream responseFromSlaveDevices
-    - Fields of its objects are:-
-        1. ```int transactionId``` :- Each modbus transaction has a unique number from 0 to 65535. Request & response have same transaction id, using which they are identified.
-        2. ``` String ipAddress``` :- ip address of slave device
-        3. ``` int portNumber``` :- port number of slave device
-        4. ```int unitId``` :- Commonly used in  Modbus Gateway (TCP to Serial):- Multiple Modbus RTU devices are connected to single Modbus TCP address. Each Modbus RTU device has same ip address and port number but different unit id.
-        5. ```int blockNumber``` :- block number is 0 for Coil, 1 for Discrete Input, 3 for Input Register, 4 for Holding Register
-        6. ```int elementNumber``` :- element number is an integer value from 1 to 65536
-        7. ```int timeoutMilliseconds``` :- Slave has not been able to respond within this time.
+
 4. ```SlaveResponseShutdownComplete```
     - This type is used for internal function of this library.
-    - Stream ```responseFromSlaveDevices``` never emits an element of this type.
+    - Stream ```responseFromSlaveDevices``` of object of class ```ModbusMaster``` never emits an element of this type.
