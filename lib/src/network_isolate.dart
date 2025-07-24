@@ -24,6 +24,8 @@ final class UserRequestData extends UserRequest {
   final int timeoutMilliseconds;
   final Uint8List mbap;
   final Uint8List pdu;
+  final bool isReadRequest;
+  final bool isWriteRequest;
 
   UserRequestData({
     // required this.isIpv4,
@@ -37,6 +39,8 @@ final class UserRequestData extends UserRequest {
     required this.timeoutMilliseconds,
     required this.mbap,
     required this.pdu,
+    required this.isReadRequest,
+    required this.isWriteRequest,
   });
 
   @override
@@ -175,7 +179,9 @@ class NetworkIsolateData {
         int blockNumber,
         int elementNumber,
         int timeoutMilliseconds,
-        DateTime timestampWhenMessageSentToSocket
+        DateTime timestampWhenMessageSentToSocket,
+        bool isReadRequest,
+        bool isWriteRequest,
       })> tableRequestSentToSocket = {};
 
   final Map<
@@ -209,6 +215,8 @@ class NetworkIsolateData {
           blockNumber: entry.value.blockNumber,
           elementNumber: entry.value.elementNumber,
           timeoutMilliseconds: entry.value.timeoutMilliseconds,
+          isReadResponse: entry.value.isReadRequest,
+          isWriteResponse: entry.value.isWriteRequest,
         ));
       } else if (tableAliveSockets[(
             ipAddress: entry.key.ipAddress,
@@ -222,13 +230,13 @@ class NetworkIsolateData {
         keysOfRowsToBeDeleted.add(entry.key);
         sendPort.send(SlaveResponseConnectionError(
           transactionId: entry.key.transactionId,
-          // isIpv4: entry.value.isIpv4,
-          // isIpv6: entry.value.isIpv6,
           ipAddress: entry.key.ipAddress,
           portNumber: entry.key.portNumber,
           unitId: entry.key.unitId,
           blockNumber: entry.value.blockNumber,
           elementNumber: entry.value.elementNumber,
+          isReadResponse: entry.value.isReadRequest,
+          isWriteResponse: entry.value.isWriteRequest,
         ));
       }
     }
@@ -319,7 +327,9 @@ class NetworkIsolateData {
               blockNumber: request.blockNumber,
               elementNumber: request.elementNumber,
               timeoutMilliseconds: request.timeoutMilliseconds,
-              timestampWhenMessageSentToSocket: timeStampMessageSentToSocket
+              timestampWhenMessageSentToSocket: timeStampMessageSentToSocket,
+              isReadRequest: request.isReadRequest,
+              isWriteRequest: request.isWriteRequest
             );
             Logging.i("SENT TO SOCKET :- ${request.mbap + request.pdu}");
           } catch (e, f) {
@@ -383,21 +393,24 @@ class NetworkIsolateData {
               blockNumber: request.blockNumber,
               elementNumber: request.elementNumber,
               timeoutMilliseconds: request.timeoutMilliseconds,
-              timestampWhenMessageSentToSocket: timeStampMessageSentToSocket
+              timestampWhenMessageSentToSocket: timeStampMessageSentToSocket,
+              isReadRequest: request.isReadRequest,
+              isWriteRequest: request.isWriteRequest,
             );
             Logging.i("SENT TO SOCKET :- ${request.mbap + request.pdu}");
           } catch (e, f) {
             Logging.i(e);
             Logging.i(f);
+
             sendPort.send(SlaveResponseConnectionError(
               transactionId: request.transactionId,
-              // isIpv4: request.isIpv4,
-              // isIpv6: request.isIpv6,
               ipAddress: request.ipAddress,
               portNumber: request.portNumber,
               unitId: request.unitId,
               blockNumber: request.blockNumber,
               elementNumber: request.elementNumber,
+              isReadResponse: request.isReadRequest,
+              isWriteResponse: request.isWriteRequest,
             ));
           }
         }

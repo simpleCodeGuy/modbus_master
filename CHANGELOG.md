@@ -11,3 +11,7 @@
 - Updated README.md file
 - Provided docstrings
 - updated modbus_slave.py file
+
+## 2.1.1
+- Updated README.md file
+- Added two more fields `isReadResponse` and `isWriteResponse` in class `SlaveResponseConnectionError` as well as class `SlaveResponseTimeoutError`

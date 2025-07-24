@@ -25,7 +25,7 @@ void main() async {
   for (int i = 1; i <= 5; ++i) {
     try {
       modbusMaster.read(
-        ipAddress: '192.168.29.166', // change it as per your slave device
+        ipAddress: '192.168.29.163', // change it as per your slave device
         portNumber: 502, // change it as per your slave device
         unitId: 1, // change it as per your slave device
         blockNumber: 4, // block number 4 means Holding Register

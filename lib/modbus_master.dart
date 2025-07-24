@@ -263,6 +263,9 @@ class ModbusMaster {
 
   ///```read```
   ///- Sends a read request to a slave device.
+  ///- Returns transaction id :- Transaction id is a unique number
+  ///   between 0 and 65535 for a Modbus TCP request.  Request & response
+  ///  have same transaction id, using which they are identified.
   ///- At present, this library only supports reading single element.
   ///- Arguments of this method are:-
   ///    1. ```ipAddress``` :- ip address of slave device
@@ -275,7 +278,7 @@ class ModbusMaster {
   /// // Sends a read request to read Coil 2 of a slave device with
   /// // ip address '192.168.1.3', port number 502 and unit id 1
   /// // with a timeout of 1000 milliseconds
-  /// modbusMaster.read(
+  /// final transactionId = modbusMaster.read(
   ///  ipAddress: '192.168.1.3',
   ///  portNumber: 502,
   ///  unitId: 1,
@@ -324,8 +327,8 @@ class ModbusMaster {
 
     if (blockNumber == 0) {
       _sendPortOfWorkerIsolate?.send(_generateReadRequestStreamElementForCoil(
-        // isIpv4: isIpv4,
-        // isIpv6: isIpv6,
+        isReadRequest: true,
+        isWriteRequest: false,
         ipAddress: ipAddress,
         portNumber: portNumber,
         unitId: unitId,
@@ -337,8 +340,8 @@ class ModbusMaster {
     } else if (blockNumber == 1) {
       _sendPortOfWorkerIsolate
           ?.send(_generateReadRequestStreamElementForDiscreteInput(
-        // isIpv4: isIpv4,
-        // isIpv6: isIpv6,
+        isReadRequest: true,
+        isWriteRequest: false,
         ipAddress: ipAddress,
         portNumber: portNumber,
         unitId: unitId,
@@ -350,8 +353,8 @@ class ModbusMaster {
     } else if (blockNumber == 3) {
       _sendPortOfWorkerIsolate
           ?.send(_generateReadRequestStreamElementForInputRegister(
-        // isIpv4: isIpv4,
-        // isIpv6: isIpv6,
+        isReadRequest: true,
+        isWriteRequest: false,
         ipAddress: ipAddress,
         portNumber: portNumber,
         unitId: unitId,
@@ -363,8 +366,8 @@ class ModbusMaster {
     } else if (blockNumber == 4) {
       _sendPortOfWorkerIsolate
           ?.send(_generateReadRequestStreamElementForHoldingRegister(
-        // isIpv4: isIpv4,
-        // isIpv6: isIpv6,
+        isReadRequest: true,
+        isWriteRequest: false,
         ipAddress: ipAddress,
         portNumber: portNumber,
         unitId: unitId,
@@ -380,6 +383,9 @@ class ModbusMaster {
 
   ///```write```
   ///- Sends a write request to a slave device.
+  ///- Returns transaction id :- Transaction id is a unique number
+  ///   between 0 and 65535 for a Modbus TCP request.  Request & response
+  ///  have same transaction id, using which they are identified.
   ///- At present, this library only supports writing to a single element.
   ///- Arguments of this method are:-
   ///  1. ```ipAddress``` :- ip address of slave device
@@ -394,7 +400,7 @@ class ModbusMaster {
   /// // of a slave device with ip address '192.168.1.3',
   /// // port number 502 and unit id 1 with a timeout of
   /// // 1000 milliseconds.
-  ///modbusMaster.write(
+  ///final transactionId = modbusMaster.write(
   ///  ipAddress: '192.168.1.3',
   ///  portNumber: 502,
   ///  unitId: 1,
@@ -459,22 +465,23 @@ class ModbusMaster {
 
     if (blockNumber == 0) {
       _sendPortOfWorkerIsolate?.send(_generateWriteRequestStreamElementForCoil(
-          // isIpv4: isIpv4,
-          // isIpv6: isIpv6,
-          ipAddress: ipAddress,
-          portNumber: portNumber,
-          unitId: unitId,
-          blockNumber: blockNumber,
-          elementNumber: elementNumber,
-          timeoutMilliseconds: timeoutMilliseconds,
-          transactionId: _transactionId,
-          valueToBeWritten: valueToBeWritten));
+        ipAddress: ipAddress,
+        portNumber: portNumber,
+        unitId: unitId,
+        blockNumber: blockNumber,
+        elementNumber: elementNumber,
+        timeoutMilliseconds: timeoutMilliseconds,
+        transactionId: _transactionId,
+        valueToBeWritten: valueToBeWritten,
+        isReadRequest: false,
+        isWriteRequest: true,
+      ));
     } else if (blockNumber == 4) {
       Logging.i("TRYING TO SEND WRITE REQUEST FOR HOLDING REGISTER");
-      _sendPortOfWorkerIsolate
-          ?.send(_generateWriteRequestStreamElementForHoldingRegister(
-              // isIpv4: isIpv4,
-              // isIpv6: isIpv6,
+      _sendPortOfWorkerIsolate?.send(
+          _generateWriteRequestStreamElementForHoldingRegister(
+              isReadRequest: false,
+              isWriteRequest: true,
               ipAddress: ipAddress,
               portNumber: portNumber,
               unitId: unitId,
@@ -489,8 +496,6 @@ class ModbusMaster {
   }
 
   UserRequestData _generateReadRequestStreamElementForCoil({
-    // required bool isIpv4,
-    // required bool isIpv6,
     required String ipAddress,
     required int portNumber,
     required int unitId,
@@ -498,6 +503,8 @@ class ModbusMaster {
     required int elementNumber,
     required int timeoutMilliseconds,
     required int transactionId,
+    required bool isReadRequest,
+    required bool isWriteRequest,
   }) {
     final memoryAddress = elementNumber - 1;
     final memoryAddressLsb = memoryAddress % 256;
@@ -509,8 +516,8 @@ class ModbusMaster {
     final pdu =
         Uint8List.fromList([1, memoryAddressMsb, memoryAddressLsb, 0, 1]);
     return UserRequestData(
-      // isIpv4: isIpv4,
-      // isIpv6: isIpv6,
+      isReadRequest: isReadRequest,
+      isWriteRequest: isWriteRequest,
       ipAddress: ipAddress,
       portNumber: portNumber,
       unitId: unitId,
@@ -533,6 +540,8 @@ class ModbusMaster {
     required int elementNumber,
     required int timeoutMilliseconds,
     required int transactionId,
+    required bool isReadRequest,
+    required bool isWriteRequest,
   }) {
     final memoryAddress = elementNumber - 1;
     final memoryAddressLsb = memoryAddress % 256;
@@ -544,8 +553,8 @@ class ModbusMaster {
     final pdu =
         Uint8List.fromList([2, memoryAddressMsb, memoryAddressLsb, 0, 1]);
     return UserRequestData(
-      // isIpv4: isIpv4,
-      // isIpv6: isIpv6,
+      isReadRequest: isReadRequest,
+      isWriteRequest: isWriteRequest,
       ipAddress: ipAddress,
       portNumber: portNumber,
       unitId: unitId,
@@ -568,6 +577,8 @@ class ModbusMaster {
     required int elementNumber,
     required int timeoutMilliseconds,
     required int transactionId,
+    required bool isReadRequest,
+    required bool isWriteRequest,
   }) {
     final memoryAddress = elementNumber - 1;
     final memoryAddressLsb = memoryAddress % 256;
@@ -579,8 +590,8 @@ class ModbusMaster {
     final pdu =
         Uint8List.fromList([4, memoryAddressMsb, memoryAddressLsb, 0, 1]);
     return UserRequestData(
-      // isIpv4: isIpv4,
-      // isIpv6: isIpv6,
+      isReadRequest: isReadRequest,
+      isWriteRequest: isWriteRequest,
       ipAddress: ipAddress,
       portNumber: portNumber,
       unitId: unitId,
@@ -603,6 +614,8 @@ class ModbusMaster {
     required int elementNumber,
     required int timeoutMilliseconds,
     required int transactionId,
+    required bool isReadRequest,
+    required bool isWriteRequest,
   }) {
     final memoryAddress = elementNumber - 1;
     final memoryAddressLsb = memoryAddress % 256;
@@ -614,8 +627,8 @@ class ModbusMaster {
     final pdu =
         Uint8List.fromList([3, memoryAddressMsb, memoryAddressLsb, 0, 1]);
     return UserRequestData(
-      // isIpv4: isIpv4,
-      // isIpv6: isIpv6,
+      isReadRequest: isReadRequest,
+      isWriteRequest: isWriteRequest,
       ipAddress: ipAddress,
       portNumber: portNumber,
       unitId: unitId,
@@ -639,6 +652,8 @@ class ModbusMaster {
     required int timeoutMilliseconds,
     required int transactionId,
     required int valueToBeWritten,
+    required bool isReadRequest,
+    required bool isWriteRequest,
   }) {
     final memoryAddress = elementNumber - 1;
     final memoryAddressLsb = memoryAddress % 256;
@@ -652,8 +667,8 @@ class ModbusMaster {
     final pdu = Uint8List.fromList(
         [5, memoryAddressMsb, memoryAddressLsb, valueMsb, valueLsb]);
     return UserRequestData(
-      // isIpv4: isIpv4,
-      // isIpv6: isIpv6,
+      isReadRequest: isReadRequest,
+      isWriteRequest: isWriteRequest,
       ipAddress: ipAddress,
       portNumber: portNumber,
       unitId: unitId,
@@ -677,6 +692,8 @@ class ModbusMaster {
     required int timeoutMilliseconds,
     required int transactionId,
     required int valueToBeWritten,
+    required bool isReadRequest,
+    required bool isWriteRequest,
   }) {
     final memoryAddress = elementNumber - 1;
     final memoryAddressLsb = memoryAddress % 256;
@@ -690,8 +707,8 @@ class ModbusMaster {
     final pdu = Uint8List.fromList(
         [6, memoryAddressMsb, memoryAddressLsb, valueMsb, valueLsb]);
     return UserRequestData(
-      // isIpv4: isIpv4,
-      // isIpv6: isIpv6,
+      isReadRequest: isReadRequest,
+      isWriteRequest: isWriteRequest,
       ipAddress: ipAddress,
       portNumber: portNumber,
       unitId: unitId,
@@ -706,10 +723,10 @@ class ModbusMaster {
 }
 
 //----------------------------DATA STRUCTURE------------------------------------
-/// ```SlaveResponse``` is a sealed class, hence its object is not created,
+/// `SlaveResponse` is a sealed class, hence its object is not created,
 /// rather object of its sub-types are created internally by library.
 /// These subtypes are received as an element of
-/// stream ```responseFromSlaveDevices``` of object of class ```ModbusMaster```.
+/// stream `responseFromSlaveDevices` of object of class `ModbusMaster`.
 ///
 /// These sub-types are as follows:-
 /// 1. SlaveResponseDataReceived
@@ -721,21 +738,21 @@ sealed class SlaveResponse extends Equatable {
   List<Object?> get props => [];
 }
 
-/// ```SlaveResponseDataReceived```
+/// `SlaveResponseDataReceived`
 /// - When slave device responds with a data, then object of this type is received from the stream responseFromSlaveDevices
 /// - Fields of its objects are:-
-///   1. ```int transactionId``` :- Each modbus transaction has a unique number from 0 to 65535. Request & response have same transaction id, using which they are identified.
-///   2. ```String ipAddress``` :- ip address of slave device
-///   3. ```int portNumber``` :- port number of slave device
-///   4. ```int unitId``` :- Commonly used in  Modbus Gateway (TCP to Serial):- Multiple Modbus RTU devices are connected to single Modbus TCP address. Each Modbus RTU device has same ip address and port number but different unit id.
-///   5. ```int blockNumber``` :- block number is 0 for Coil, 1 for Discrete Input, 3 for Input Register, 4 for Holding Register
-///   6. ```int elementNumber``` :- element number is an integer value from 1 to 65536
-///   7. ```String mbap``` :- Hexidecimal string of actual MBAP (as per Modbus TCP protocol) which is responded by slave device.
-///   8. ```String pdu``` :- Hexidecimal string of actual PDU (as per Modbus TCP protocol) which is responded by slave device.
-///   9. ```bool isReadResponse``` :- If PDU contains a read response, then it is true.
-///   10. ```int? readValue``` :- If PDU contains a read response, then it contains its value.
-///   11. ```bool isWriteResponse```:- If PDU contains a write response, then it is true.
-///   12. ```int? writeValue```:- If PDU contains a write response, then it contains its value.
+///   1. `int transactionId` :- Each modbus transaction has a unique number from 0 to 65535. Request & response have same transaction id, using which they are identified.
+///   2. `String ipAddress` :- ip address of slave device
+///   3. `int portNumber` :- port number of slave device
+///   4. `int unitId` :- Commonly used in  Modbus Gateway (TCP to Serial):- Multiple Modbus RTU devices are connected to single Modbus TCP address. Each Modbus RTU device has same ip address and port number but different unit id.
+///   5. `int blockNumber` :- block number is 0 for Coil, 1 for Discrete Input, 3 for Input Register, 4 for Holding Register
+///   6. `int elementNumber` :- element number is an integer value from 1 to 65536
+///   7. `String mbap` :- Hexidecimal string of actual MBAP (as per Modbus TCP protocol) which is responded by slave device.
+///   8. `String pdu` :- Hexidecimal string of actual PDU (as per Modbus TCP protocol) which is responded by slave device.
+///   9. `bool isReadResponse` :- If PDU contains a read response, then it is true.
+///   10. `int? readValue` :- If PDU contains a read response, then it contains its value.
+///   11. `bool isWriteResponse`:- If PDU contains a write response, then it is true.
+///   12. `int? writeValue`:- If PDU contains a write response, then it contains its value.
 final class SlaveResponseDataReceived extends SlaveResponse {
   final int transactionId;
   final String ipAddress;
@@ -782,15 +799,17 @@ final class SlaveResponseDataReceived extends SlaveResponse {
       "}";
 }
 
-/// ```SlaveResponseConnectionError```
+/// `SlaveResponseConnectionError`
 /// - When TCP connection is not established with a slave device, then this element is received from stream responseFromSlaveDevices
 /// - Fields of its objects are:-
-///   1. ```int transactionId``` :- Each modbus transaction has a unique number from 0 to 65535. Request & response have same transaction id, using which they are identified.
-///   2. ``` String ipAddress``` :- ip address of slave device
-///   3. ``` int portNumber``` :- port number of slave device
-///   4. ``` int unitId``` :- Commonly used in  Modbus Gateway (TCP to Serial):- Multiple Modbus RTU devices are connected to single Modbus TCP address. Each Modbus RTU device has same ip address and port number but different unit id.
-///   5. ``` int blockNumber``` :- block number is 0 for Coil, 1 for Discrete Input, 3 for Input Register, 4 for Holding Register
-///   6. ```int elementNumber```:- element number is an integer value from 1 to 65536
+///   1. `int transactionId` :- Each modbus transaction has a unique number from 0 to 65535. Request & response have same transaction id, using which they are identified.
+///   2. `String ipAddress` :- ip address of slave device
+///   3. `int portNumber` :- port number of slave device
+///   4. `int unitId` :- Commonly used in  Modbus Gateway (TCP to Serial):- Multiple Modbus RTU devices are connected to single Modbus TCP address. Each Modbus RTU device has same ip address and port number but different unit id.
+///   5. `int blockNumber` :- block number is 0 for Coil, 1 for Discrete Input, 3 for Input Register, 4 for Holding Register
+///   6. `int elementNumber`:- element number is an integer value from 1 to 65536
+///   7. `bool isReadResponse` :- If request was a read request, then it is true
+///   8. `bool isWriteResponse` :- If request was a write request, then it is true
 final class SlaveResponseConnectionError extends SlaveResponse {
   final int transactionId;
   final String ipAddress;
@@ -798,6 +817,8 @@ final class SlaveResponseConnectionError extends SlaveResponse {
   final int unitId;
   final int blockNumber;
   final int elementNumber;
+  final bool isReadResponse;
+  final bool isWriteResponse;
 
   SlaveResponseConnectionError({
     required this.transactionId,
@@ -806,6 +827,8 @@ final class SlaveResponseConnectionError extends SlaveResponse {
     required this.unitId,
     required this.blockNumber,
     required this.elementNumber,
+    required this.isReadResponse,
+    required this.isWriteResponse,
   });
 
   @override
@@ -825,19 +848,22 @@ final class SlaveResponseConnectionError extends SlaveResponse {
       // "    isIpv4:$isIpv4, isIpv6:$isIpv6, "
       "    ipAddress:$ipAddress, portNumber:$portNumber, unitId:$unitId\n"
       "    blockNumber:$blockNumber, elementNumber:$elementNumber\n"
+      "    isReadResponse:$isReadResponse, isWriteResponse:$isWriteResponse\n"
       "}";
 }
 
 /// ```SlaveResponseTimeoutError```
 /// - When slave device does not respond within timeout value provided during read or write request, then this element is received from stream responseFromSlaveDevices
 /// - Fields of its objects are:-
-///     1. ```int transactionId``` :- Each modbus transaction has a unique number from 0 to 65535. Request & response have same transaction id, using which they are identified.
-///     2. ``` String ipAddress``` :- ip address of slave device
-///     3. ``` int portNumber``` :- port number of slave device
-///     4. ```int unitId``` :- Commonly used in  Modbus Gateway (TCP to Serial):- Multiple Modbus RTU devices are connected to single Modbus TCP address. Each Modbus RTU device has same ip address and port number but different unit id.
-///     5. ```int blockNumber``` :- block number is 0 for Coil, 1 for Discrete Input, 3 for Input Register, 4 for Holding Register
-///     6. ```int elementNumber``` :- element number is an integer value from 1 to 65536
-///     7. ```int timeoutMilliseconds``` :- Slave has not been able to respond within this time.
+///     1. `int transactionId` :- Each modbus transaction has a unique number from 0 to 65535. Request & response have same transaction id, using which they are identified.
+///     2. `String ipAddress` :- ip address of slave device
+///     3. ` int portNumber` :- port number of slave device
+///     4. `int unitId` :- Commonly used in  Modbus Gateway (TCP to Serial):- Multiple Modbus RTU devices are connected to single Modbus TCP address. Each Modbus RTU device has same ip address and port number but different unit id.
+///     5. `int blockNumber` :- block number is 0 for Coil, 1 for Discrete Input, 3 for Input Register, 4 for Holding Register
+///     6. `int elementNumber` :- element number is an integer value from 1 to 65536
+///     7. `int timeoutMilliseconds` :- Slave has not been able to respond within this time.
+///     8. `bool isReadResponse` :- If request was a read request, then it is true
+///     9. `bool isWriteResponse` :- If request was a write request, then it is true
 final class SlaveResponseTimeoutError extends SlaveResponse {
   final int transactionId;
   final String ipAddress;
@@ -846,17 +872,19 @@ final class SlaveResponseTimeoutError extends SlaveResponse {
   final int blockNumber;
   final int elementNumber;
   final int timeoutMilliseconds;
+  final bool isReadResponse;
+  final bool isWriteResponse;
 
   SlaveResponseTimeoutError({
     required this.transactionId,
-    // required this.isIpv4,
-    // required this.isIpv6,
     required this.ipAddress,
     required this.portNumber,
     required this.unitId,
     required this.blockNumber,
     required this.elementNumber,
     required this.timeoutMilliseconds,
+    required this.isReadResponse,
+    required this.isWriteResponse,
   });
 
   @override
@@ -877,13 +905,14 @@ final class SlaveResponseTimeoutError extends SlaveResponse {
       // "    isIpv4:$isIpv4, isIpv6:$isIpv6, "
       "    ipAddress:$ipAddress, portNumber:$portNumber, unitId:$unitId, \n"
       "    blockNumber:$blockNumber, elementNumber:$elementNumber, "
-      "timeoutMilliseconds:$timeoutMilliseconds\n"
+      "    timeoutMilliseconds:$timeoutMilliseconds\n"
+      "    isReadResponse:$isReadResponse, isWriteResponse:$isWriteResponse\n"
       "}";
 }
 
-/// ```SlaveResponseShutdownComplete```
+/// `SlaveResponseShutdownComplete`
 /// - This type is used for internal function of this library.
-/// - Stream ```responseFromSlaveDevices``` of object of class ```ModbusMaster```
+/// - Stream `responseFromSlaveDevices` of object of class `ModbusMaster`
 ///   never emits an element of this type.
 final class SlaveResponseShutdownComplete extends SlaveResponse {
   @override
