@@ -24,13 +24,14 @@ void main() async {
 
   for (int i = 1; i <= 5; ++i) {
     try {
-      modbusMaster.read(
-        ipAddress: '192.168.29.163', // change it as per your slave device
+      modbusMaster.write(
+        ipAddress: '10.49.39.201', // change it as per your slave device
         portNumber: 502, // change it as per your slave device
         unitId: 1, // change it as per your slave device
         blockNumber: 4, // block number 4 means Holding Register
-        elementNumber: 6000 + i,
+        elementNumber: i,
         timeoutMilliseconds: 1000,
+        valueToBeWritten: 10 * i,
       );
     } catch (e, f) {
       print('EXCEPTION THROWN:-\n$e\n$f');
