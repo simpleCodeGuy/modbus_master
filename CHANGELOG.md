@@ -15,3 +15,11 @@
 ## 2.1.0
 - Updated README.md file
 - Added two more fields `isReadResponse` and `isWriteResponse` in class `SlaveResponseConnectionError` as well as class `SlaveResponseTimeoutError`
+
+## 2.1.1
+- Bug fixes:- In case of Error Response, field `isReadResponse`/`isWriteResponse` is `true` and `readValue`/`writeValue` is null of object of class `SlaveResponseDataReceived` is true.
+
+## 2.1.2
+- Bug fixes:- 
+  - Inside Worker Isolate :- When `UserRequestShutdown` is received in worker isolate, then all sockets are now closed using `await socket.close()` instead of `socket.destroy()`.
+  - Inside Main Isolate:- When `SlaveResponseShutdownComplete` is received in main isolate, then receive port of main isolate is also closed.

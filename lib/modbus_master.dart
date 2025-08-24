@@ -69,7 +69,7 @@ import 'package:modbus_master/src/my_logging.dart';
 ///
 /// - Wait to know that that all resources have been properly stopped
 ///   ```
-///   final isProperlyStopped = await modbusMaster.isStoppedAsync
+///   final isProperlyStopped = await modbusMaster.isStoppedAsync;
 ///   ```
 class ModbusMaster {
   static const timeoutMillisecondsMinimum = 200;
@@ -189,6 +189,14 @@ class ModbusMaster {
 
     modbusMaster._receivePortOfMainIsolate!.listen((data) {
       Logging.i("MASTER ISOLATE RECEIVED : ${data.runtimeType}\n$data");
+      if (data is List) {
+        Logging.i("Length of list = ${data.length}");
+        Logging.i(data);
+        for (final item in data) {
+          Logging.i("TYPE = ${item.runtimeType}\n ITEM = $item");
+        }
+      }
+
       switch (data) {
         case SlaveResponseDataReceived _:
           modbusMaster._streamController!.add(data);
@@ -205,10 +213,10 @@ class ModbusMaster {
           break;
         case SlaveResponseShutdownComplete _:
           modbusMaster._streamController!.close();
+          modbusMaster._receivePortOfMainIsolate?.close();
           break;
         default:
           if (data == null) {
-            // Logging.i("");
             modbusMaster._receivePortOfMainIsolate?.close();
           }
       }
@@ -478,18 +486,19 @@ class ModbusMaster {
       ));
     } else if (blockNumber == 4) {
       Logging.i("TRYING TO SEND WRITE REQUEST FOR HOLDING REGISTER");
-      _sendPortOfWorkerIsolate?.send(
-          _generateWriteRequestStreamElementForHoldingRegister(
-              isReadRequest: false,
-              isWriteRequest: true,
-              ipAddress: ipAddress,
-              portNumber: portNumber,
-              unitId: unitId,
-              blockNumber: blockNumber,
-              elementNumber: elementNumber,
-              timeoutMilliseconds: timeoutMilliseconds,
-              transactionId: _transactionId,
-              valueToBeWritten: valueToBeWritten));
+      _sendPortOfWorkerIsolate
+          ?.send(_generateWriteRequestStreamElementForHoldingRegister(
+        isReadRequest: false,
+        isWriteRequest: true,
+        ipAddress: ipAddress,
+        portNumber: portNumber,
+        unitId: unitId,
+        blockNumber: blockNumber,
+        elementNumber: elementNumber,
+        timeoutMilliseconds: timeoutMilliseconds,
+        transactionId: _transactionId,
+        valueToBeWritten: valueToBeWritten,
+      ));
     }
 
     return _transactionId;

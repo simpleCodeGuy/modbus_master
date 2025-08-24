@@ -122,10 +122,15 @@ String hexadecimalFrom4bitInteger(int num) {
     getValueFromModbusPdu(Uint8List pdu) {
   final functionCode = pdu[0];
 
-  final isReadResponse = functionCode == 1 ||
-      functionCode == 2 ||
-      functionCode == 3 ||
-      functionCode == 4;
+  final isReadResponse = functionCode == 1 || // Read Coils
+      functionCode == 2 || // Read physical discrete inputs
+      functionCode == 3 || // Read holding registers
+      functionCode == 4 || // Read physical input register
+      functionCode == 129 || // Error Response for Read Coil
+      functionCode == 130 || // Error Response for Read inputs
+      functionCode == 131 || // Error Response for Read holding registers
+      functionCode == 132; // Error Response for Input Registers
+
   int? readValue;
   if (functionCode == 1) {
     //BY DEFAULT READING SINGLE COIL
@@ -141,7 +146,13 @@ String hexadecimalFrom4bitInteger(int num) {
     readValue = pdu[1] == 2 ? pdu[2] * 256 + pdu[3] : null;
   }
 
-  final isWriteResponse = functionCode == 5 || functionCode == 6;
+  final isWriteResponse = functionCode == 5 || // Write Single Coil
+      functionCode == 6 || // Write Single Register
+      functionCode == 133 || // Error Response for Write Single Coil
+      functionCode == 134 || // Error Response for Write Single Register
+      functionCode == 143 || // Error Response for Write multiple coils
+      functionCode == 144; // Error Response for Write multiple registers
+
   int? writeValue;
   if (functionCode == 5) {
     writeValue = pdu[3] == 255 ? 1 : 0;
@@ -421,12 +432,12 @@ class NetworkIsolateData {
         while (tableAliveSockets.isNotEmpty) {
           final firstKey = tableAliveSockets.keys.first;
           final socket = tableAliveSockets[firstKey];
-          socket?.destroy();
-          socket?.close();
+          // socket?.destroy();
+          await socket?.close();
           tableAliveSockets.remove(firstKey);
         }
 
-        tableAliveSockets.clear();
+        // tableAliveSockets.clear();
         tableRequestSentToSocket.clear();
         tableMessageReceivedFromSocket.clear();
         receivePortWorkerIsolate.close();
@@ -478,8 +489,11 @@ class NetworkIsolateData {
         }
       }
     }, onDone: () {
-      Logging.i(
-          "DONE RECEIVED IN SOCKET : $ipAddress , $portNumber, ${socketNew.remoteAddress.type}");
+      // Logging.i(
+      // "DONE RECEIVED IN SOCKET : $ipAddress , $portNumber, ${socketNew.remoteAddress.type}");
+      // Logging.i(socketNew.remoteAddress);
+      // socketNew.
+
       socketNew.destroy();
       final keyToBeDeleted = (ipAddress: ipAddress, portNumber: portNumber);
       if (tableAliveSockets[keyToBeDeleted] != null) {
